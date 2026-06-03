@@ -179,6 +179,15 @@ function useDirectorySearch(args: {
     return fuzzysort.go(query, items, { key: "name", limit }).map((x) => x.obj.absolute)
   }
 
+  const existingDirectory = async (absolute: string) => {
+    const full = trimTrailing(absolute)
+    const parent = parentOf(full)
+    const name = getFilename(full)
+    if (!name) return
+    const items = await dirs(parent)
+    return items.find((item) => item.name === name && item.absolute === full)?.absolute
+  }
+
   return async (filter: string) => {
     const token = ++current
     const active = () => token === current
@@ -190,6 +199,7 @@ function useDirectorySearch(args: {
     const raw = normalizeDriveRoot(value)
     const isPath = raw.startsWith("~") || !!rootOf(raw) || raw.includes("/")
     const query = normalizeDriveRoot(scopedInput.path)
+    const exactDirectory = query ? await existingDirectory(joinPath(scopedInput.directory, query)) : undefined
 
     const find = () =>
       args.sdk.client.find
@@ -229,18 +239,20 @@ function useDirectorySearch(args: {
     const base = raw.startsWith("~") ? trimTrailing(scopedInput.directory) : ""
     const expand = !raw.endsWith("/")
     if (!expand || !tail) {
-      const items = base ? Array.from(new Set([base, ...deduped])) : deduped
+      const items = base
+        ? Array.from(new Set([base, ...deduped]))
+        : Array.from(new Set([...(exactDirectory ? [exactDirectory] : []), ...deduped]))
       return items.slice(0, 50)
     }
 
     const needle = tail.toLowerCase()
     const exact = deduped.filter((p) => getFilename(p).toLowerCase() === needle)
     const target = exact[0]
-    if (!target) return deduped.slice(0, 50)
+    if (!target) return Array.from(new Set([...(exactDirectory ? [exactDirectory] : []), ...deduped])).slice(0, 50)
 
     const children = await match(target, "", 30)
     if (!active()) return []
-    const items = Array.from(new Set([...deduped, ...children]))
+    const items = Array.from(new Set([...(exactDirectory ? [exactDirectory] : []), ...deduped, ...children]))
     return (base ? Array.from(new Set([base, ...items])) : items).slice(0, 50)
   }
 }

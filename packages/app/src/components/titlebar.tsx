@@ -24,6 +24,7 @@ import { Avatar as AvatarV2 } from "@opencode-ai/ui/v2/components/avatar-v2.jsx"
 import { displayName, getProjectAvatarSource, projectForSession } from "@/pages/layout/helpers"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { StatusPopoverV2 } from "@/components/status-popover"
+import { Spinner } from "@opencode-ai/ui/spinner"
 import {
   readSessionTabsRemovedDetail,
   SESSION_TABS_REMOVED_EVENT,
@@ -447,7 +448,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                 (tab) => {
                   const sync = serverSync.createDirSyncContext(tab.dir)
                   const session = sync.session.get(tab.sessionId)
-                  return session ? { ...tab, info: session } : null
+                  return session ? { ...tab, info: session, working: () => sync.data.session_working(tab.sessionId) } : null
                 },
               )
 
@@ -489,6 +490,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                             title={tab.info.title}
                             project={projectForSession(tab.info, projects(), projectByID())}
                             directory={tab.dir}
+                            working={tab.working()}
                             onClose={() => tabsStoreActions.removeTab(tab.href)}
                           />
                         </>
@@ -736,6 +738,7 @@ function TabNavItem(props: {
   title: string
   project?: LocalProject
   directory: string
+  working?: boolean
   onClose: () => void
 }) {
   const match = useMatch(() => props.href)
@@ -751,6 +754,11 @@ function TabNavItem(props: {
       >
         <ProjectTabAvatar project={props.project} directory={props.directory} />
         <span class="text-clip leading-5">{props.title}</span>
+        <Show when={props.working}>
+          <span class="flex size-3.5 shrink-0 items-center justify-center text-v2-icon-icon-muted">
+            <Spinner class="size-3.5" />
+          </span>
+        </Show>
       </a>
 
       <div class="absolute not-group-hover:not-group-data-[active=true]:left-52 group-hover:right-0 group-data-[active=true]:right-0 inset-y-0 flex flex-row items-center pr-1 py-1 w-8 pl-2">
