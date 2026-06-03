@@ -6,12 +6,12 @@ on:
       version:
         description: "Version to embed in the build"
         required: false
-        default: "0.0.0-dev"
+        default: "1.15.13"
         type: string
       channel:
         description: "Desktop channel"
         required: false
-        default: "dev"
+        default: "prod"
         type: choice
         options:
           - dev
@@ -43,22 +43,22 @@ jobs:
         run: bun ./scripts/prepare.ts
         working-directory: packages/desktop
         env:
-          OPENCODE_VERSION: ${{ github.event.inputs.version || '0.0.0-dev' }}
-          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          OPENCODE_VERSION: ${{ github.event.inputs.version || '1.15.13' }}
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'prod' }}
           RUST_TARGET: aarch64-apple-darwin
 
       - name: Build desktop app
         run: bun run build
         working-directory: packages/desktop
         env:
-          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'prod' }}
 
       - name: Package mac app
         run: npx electron-builder --mac --arm64 --publish never --config electron-builder.config.ts -c.mac.notarize=false -c.dmg.sign=false
         working-directory: packages/desktop
         timeout-minutes: 60
         env:
-          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'prod' }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload mac artifacts
