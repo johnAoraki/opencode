@@ -1,0 +1,79 @@
+name: build mac
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to embed in the build"
+        required: false
+        default: "0.0.0-dev"
+        type: string
+      channel:
+        description: "Desktop channel"
+        required: false
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - beta
+          - prod
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  build-mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-15-arm64
+            target: aarch64-apple-darwin
+            platform_flag: --mac --arm64
+            bun_install_flags: --os=darwin --cpu=arm64
+          - host: macos-13
+            target: x86_64-apple-darwin
+            platform_flag: --mac --x64
+            bun_install_flags: --os=darwin --cpu=x64
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: ${{ matrix.settings.bun_install_flags }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Prepare desktop build
+        run: bun ./scripts/prepare.ts
+        working-directory: packages/desktop
+        env:
+          OPENCODE_VERSION: ${{ github.event.inputs.version || '0.0.0-dev' }}
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          RUST_TARGET: ${{ matrix.settings.target }}
+
+      - name: Build desktop app
+        run: bun run build
+        working-directory: packages/desktop
+        env:
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+
+      - name: Package mac app
+        run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts -c.mac.notarize=false -c.dmg.sign=false
+        working-directory: packages/desktop
+        timeout-minutes: 60
+        env:
+          OPENCODE_CHANNEL: ${{ github.event.inputs.channel || 'dev' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload mac artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: opencode-desktop-${{ matrix.settings.target }}
+          path: packages/desktop/dist/*
