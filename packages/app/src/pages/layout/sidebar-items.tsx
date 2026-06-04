@@ -79,6 +79,7 @@ export type SessionItemProps = {
   dense?: boolean
   showTooltip?: boolean
   showChild?: boolean
+  showArchive?: boolean
   level?: number
   sidebarExpanded: Accessor<boolean>
   clearHoverProjectSoon: () => void
@@ -231,7 +232,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             </Show>
           </div>
 
-          <Show when={!props.level}>
+          <Show when={!props.level && props.showArchive !== false}>
             <div
               class="shrink-0 overflow-hidden transition-[width,opacity]"
               classList={{

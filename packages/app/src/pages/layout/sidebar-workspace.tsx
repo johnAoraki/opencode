@@ -15,11 +15,12 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { type LocalProject } from "@/context/layout"
 import { useServerSync, useQueryOptions } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
 import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions } from "./helpers"
-import { useIsFetching } from "@tanstack/solid-query"
+import { useIsFetching, useQuery } from "@tanstack/solid-query"
 
 type InlineEditorComponent = (props: {
   id: string
@@ -290,6 +291,73 @@ const WorkspaceSessionList = (props: {
   </nav>
 )
 
+const ArchivedSessionList = (props: {
+  directory: string
+  slug: Accessor<string>
+  mobile?: boolean
+  ctx: WorkspaceSidebarContext
+  enabled: Accessor<boolean>
+  language: ReturnType<typeof useLanguage>
+}): JSX.Element => {
+  const serverSDK = useServerSDK()
+  const [state, setState] = createStore({ open: false })
+  const sessions = useQuery(() => ({
+    queryKey: [pathKey(props.directory), "archivedSessions"] as const,
+    enabled: () => props.enabled(),
+    queryFn: async () => {
+      const sdk = serverSDK.createClient({ directory: props.directory, throwOnError: true })
+      const result = await sdk.experimental.session.list({ directory: props.directory, roots: true, archived: true, limit: 200 })
+      return (result.data ?? [])
+        .filter((session) => !session.parentID && !!session.time?.archived)
+        .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
+    },
+  }))
+  const list = createMemo(() => sessions.data ?? [])
+  const count = createMemo(() => list().length)
+
+  return (
+    <Show when={count() > 0 || sessions.isFetching}>
+      <div class="pt-2">
+        <Collapsible variant="ghost" open={state.open} class="shrink-0" onOpenChange={(open) => setState("open", open)}>
+          <Collapsible.Trigger class="flex items-center justify-between w-full pl-2 pr-2 py-1.5 rounded-md hover:bg-surface-raised-base-hover">
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="shrink-0 size-6 flex items-center justify-center">
+                <Show when={!sessions.isFetching} fallback={<Spinner class="size-[15px]" />}>
+                  <Icon name="archive" size="small" class="text-icon-weak" />
+                </Show>
+              </div>
+              <span class="text-14-regular text-text-weak min-w-0 truncate">
+                {props.language.t("common.archive")} ({count()})
+              </span>
+            </div>
+            <Icon name={state.open ? "chevron-down" : "chevron-right"} size="small" class="text-icon-base" />
+          </Collapsible.Trigger>
+          <Collapsible.Content>
+            <nav class="flex flex-col gap-1 pt-1">
+              <For each={list()}>
+                {(session) => (
+                  <SessionItem
+                    session={session}
+                    list={list()}
+                    navList={props.ctx.navList}
+                    slug={props.slug()}
+                    mobile={props.mobile}
+                    sidebarExpanded={props.ctx.sidebarExpanded}
+                    clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+                    prefetchSession={props.ctx.prefetchSession}
+                    archiveSession={props.ctx.archiveSession}
+                    showArchive={false}
+                  />
+                )}
+              </For>
+            </nav>
+          </Collapsible.Content>
+        </Collapsible>
+      </div>
+    </Show>
+  )
+}
+
 export const SortableWorkspace = (props: {
   ctx: WorkspaceSidebarContext
   directory: string
@@ -434,6 +502,14 @@ export const SortableWorkspace = (props: {
             loadMore={loadMore}
             language={language}
           />
+          <ArchivedSessionList
+            directory={props.directory}
+            slug={slug}
+            mobile={props.mobile}
+            ctx={props.ctx}
+            enabled={open}
+            language={language}
+          />
         </Collapsible.Content>
       </Collapsible>
     </div>
@@ -478,6 +554,14 @@ export const LocalWorkspace = (props: {
         sessions={sessions}
         hasMore={hasMore}
         loadMore={loadMore}
+        language={language}
+      />
+      <ArchivedSessionList
+        directory={props.project.worktree}
+        slug={slug}
+        mobile={props.mobile}
+        ctx={props.ctx}
+        enabled={() => true}
         language={language}
       />
     </div>
