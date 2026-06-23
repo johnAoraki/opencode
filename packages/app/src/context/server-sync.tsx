@@ -234,7 +234,7 @@ export function createServerSyncContext() {
     },
   })
 
-  async function loadSessions(directory: string) {
+  async function loadSessions(directory: string, options: { force?: boolean } = {}) {
     const key = directoryKey(directory)
     const pending = sessionLoads.get(key)
     if (pending) return pending
@@ -242,7 +242,7 @@ export function createServerSyncContext() {
     children.pin(key)
     const [store, setStore] = children.child(directory, { bootstrap: false })
     const meta = sessionMeta.get(key)
-    if (meta && meta.limit >= store.limit) {
+    if (!options.force && meta && meta.limit >= store.limit) {
       const next = trimSessions(store.session, {
         limit: store.limit,
         permission: store.permission,

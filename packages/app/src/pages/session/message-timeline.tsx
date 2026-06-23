@@ -279,6 +279,7 @@ export function MessageTimeline(props: {
   centered: boolean
   setContentRef: (el: HTMLDivElement) => void
   historyShift: boolean
+  foregroundRefresh: number
   userMessages: UserMessage[]
   anchor: (id: string) => string
   setRevealMessage?: (fn: (id: string) => void) => void
@@ -571,6 +572,11 @@ export function MessageTimeline(props: {
   let bottomAnchorFrames = 0
   let measuredBottomAnchored = true
   const [scrollRoot, setScrollRoot] = createSignal<HTMLDivElement>()
+  const virtualizerMount = createMemo(() => {
+    const root = scrollRoot()
+    if (!root) return
+    return { root, key: `${sessionKey()}:${props.foregroundRefresh}` }
+  })
 
   const updateTitleMetrics = () => {
     if (!head || head.clientWidth <= 0) return
@@ -654,6 +660,27 @@ export function MessageTimeline(props: {
     setScrollRoot(undefined)
     connectListRoot(root)
   }
+
+  createEffect(
+    on(
+      () => props.foregroundRefresh,
+      (value) => {
+        if (value === 0) return
+        writeTimelineCache(virtualizerSessionKey, virtualizerRowKeys, virtualizer)
+        virtualizer = undefined
+        setScrollRoot(undefined)
+        requestAnimationFrame(() => {
+          const root = listRoot
+          if (!root || !root.isConnected) return
+          setScrollRoot(root)
+          requestAnimationFrame(() => {
+            virtualizer?.measure()
+            maybeAnchorBottom()
+          })
+        })
+      },
+    ),
+  )
 
   const handleListWheel = (event: WheelEvent & { currentTarget: HTMLDivElement }) => {
     const root = event.currentTarget
@@ -1581,13 +1608,14 @@ export function MessageTimeline(props: {
             </div>
           </div>
         </Show>
-        <Show when={scrollRoot()}>
-          {(root) => (
+        <Show when={virtualizerMount()} keyed>
+          {(state) => (
             <Virtualizer
+              data-foreground-refresh-key={state.key}
               data={timelineRows()}
               cache={virtualCache()}
               itemSize={virtualCache() ? undefined : timelineFallbackItemSize}
-              scrollRef={root()}
+              scrollRef={state.root}
               shift={props.historyShift}
               keepMounted={keepMounted()}
               startMargin={64}
@@ -1601,7 +1629,7 @@ export function MessageTimeline(props: {
                 virtualizerSessionKey = cacheSessionKey
                 virtualizerRowKeys = cacheRowKeys
                 maybeAnchorBottom()
-                scheduleContentRoot(root())
+                scheduleContentRoot(state.root)
               }}
             >
               {(row) => <TimelineRowView row={row} />}

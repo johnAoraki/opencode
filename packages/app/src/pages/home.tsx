@@ -21,6 +21,7 @@ import { DialogSelectDirectory } from "@/components/dialog-select-directory"
 import { DialogSelectServer } from "@/components/dialog-select-server"
 import { ServerConnection, useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
+import { useServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
@@ -62,6 +63,7 @@ export default function Home() {
 
 function HomeDesign() {
   const sync = useServerSync()
+  const serverSDK = useServerSDK()
   const layout = useLayout()
   const platform = usePlatform()
   const dialog = useDialog()
@@ -71,7 +73,19 @@ function HomeDesign() {
   const notification = useNotification()
   const [state, setState] = createStore({ search: "", project: undefined as string | undefined })
 
-  const projects = createMemo(() => layout.projects.list())
+  const localProjects = createMemo(() => layout.projects.list())
+  const projects = createMemo(() => {
+    const seen = new Set(localProjects().map((project) => pathKey(project.worktree)))
+    return [
+      ...localProjects(),
+      ...sync.data.project.flatMap((project) => {
+        const key = pathKey(project.worktree)
+        if (!key || seen.has(key)) return []
+        seen.add(key)
+        return { ...project, expanded: true }
+      }),
+    ]
+  })
   const selectedProject = createMemo(() => projects().find((project) => project.worktree === state.project))
   const directories = (project: LocalProject) => [project.worktree, ...(project.sandboxes ?? [])]
   const projectDirectories = createMemo(() => {
@@ -83,8 +97,22 @@ function HomeDesign() {
   const sessionLoad = useQuery(() => ({
     queryKey: ["home", "sessions", ...projectDirectories()] as const,
     queryFn: async () => {
-      await Promise.all(projectDirectories().map((directory) => sync.project.loadSessions(directory)))
+      await Promise.all(projectDirectories().map((directory) => sync.project.loadSessions(directory, { force: true })))
       return null
+    },
+  }))
+  const archivedLoad = useQuery(() => ({
+    queryKey: ["home", "archivedSessions", ...projectDirectories()] as const,
+    queryFn: async () => {
+      const results = await Promise.all(
+        projectDirectories().map(async (directory) => {
+          const sdk = serverSDK.createClient({ directory, throwOnError: true })
+          return sdk.experimental.session
+            .list({ directory, roots: true, archived: true, limit: 1000 })
+            .then((result) => result.data ?? [])
+        }),
+      )
+      return [...new Map(results.flat().map((session) => [`${pathKey(session.directory)}:${session.id}`, session])).values()]
     },
   }))
 
@@ -115,6 +143,25 @@ function HomeDesign() {
         return `${record.session.title} ${record.projectName}`.toLowerCase().includes(value)
       })
       .slice(0, HOME_SESSION_LIMIT)
+  })
+  const archivedRecords = createMemo(() => {
+    return (archivedLoad.data ?? [])
+      .filter((session) => !!session.time?.archived)
+      .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
+      .flatMap((session) => {
+        const project = projectForSession(session, projects(), projectByID())
+        if (!project) return []
+        return {
+          session,
+          project,
+          projectName: displayName(project),
+        }
+      })
+      .filter((record) => {
+        const value = search().toLowerCase()
+        if (!value) return true
+        return `${record.session.title} ${record.projectName}`.toLowerCase().includes(value)
+      })
   })
   const groups = createMemo(() => groupSessions(records(), language))
 
@@ -247,7 +294,7 @@ function HomeDesign() {
                 fallback={<HomeSessionSkeleton label={language.t("common.loading")} />}
               >
                 <Show
-                  when={groups().length > 0}
+                  when={groups().length > 0 || archivedRecords().length > 0}
                   fallback={
                     <HomeEmptyState
                       icon="edit"
@@ -273,6 +320,16 @@ function HomeDesign() {
                       </div>
                     )}
                   </For>
+                  <Show when={archivedRecords().length > 0}>
+                    <div class="flex min-w-0 flex-col gap-4">
+                      <HomeSessionGroupHeader title={`${language.t("common.archive")} (${archivedRecords().length})`} />
+                      <div class="flex min-w-0 flex-col gap-px">
+                        <For each={archivedRecords()}>
+                          {(record) => <HomeSessionRow record={record} openSession={openSession} />}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
                 </Show>
               </Show>
             </div>

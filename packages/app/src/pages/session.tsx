@@ -72,6 +72,7 @@ const emptyUserMessages: UserMessage[] = []
 type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
+const MOBILE_BACKGROUND_REFRESH_MS = 30_000
 
 type ChangeMode = "git" | "branch" | "turn"
 type VcsMode = "git" | "branch"
@@ -383,6 +384,7 @@ export default function Page() {
     changes: "git" as ChangeMode,
     newSessionWorktree: "main",
     deferRender: false,
+    foregroundRefresh: 0,
   })
 
   const [followup, setFollowup] = persisted(
@@ -399,6 +401,30 @@ export default function Page() {
       edit: {},
     }),
   )
+
+  let backgroundAt: number | undefined
+  let foregroundRefreshAt = 0
+
+  const refreshForegroundSession = () => {
+    const hiddenFor = backgroundAt ? Date.now() - backgroundAt : 0
+    backgroundAt = undefined
+    if (isDesktop()) return
+    if (hiddenFor < MOBILE_BACKGROUND_REFRESH_MS) return
+    if (Date.now() - foregroundRefreshAt < 5_000) return
+
+    const sessionID = params.id
+    if (!sessionID) return
+
+    foregroundRefreshAt = Date.now()
+    setStore("foregroundRefresh", (value) => value + 1)
+    void Promise.all([
+      sync.session.sync(sessionID, { force: true }),
+      sync.session.diff(sessionID, { force: true }),
+      sync.session.todo(sessionID, { force: true }),
+      serverSync.project.loadSessions(sdk.directory, { force: true }),
+      queryClient.invalidateQueries({ queryKey: vcsKey() }),
+    ]).catch(() => undefined)
+  }
 
   createComputed((prev) => {
     const key = sessionKey()
@@ -1637,6 +1663,14 @@ export default function Page() {
 
   onMount(() => {
     makeEventListener(document, "keydown", handleKeyDown)
+    makeEventListener(document, "visibilitychange", () => {
+      if (document.hidden) {
+        backgroundAt = Date.now()
+        return
+      }
+      refreshForegroundSession()
+    })
+    makeEventListener(window, "focus", refreshForegroundSession)
   })
 
   onCleanup(() => {
@@ -1789,6 +1823,7 @@ export default function Page() {
                       if (root) scheduleScrollState(root)
                     }}
                     historyShift={historyLoader.shift()}
+                    foregroundRefresh={store.foregroundRefresh}
                     userMessages={historyLoader.userMessages()}
                     anchor={anchor}
                     setRevealMessage={(fn) => {
